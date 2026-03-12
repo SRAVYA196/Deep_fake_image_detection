@@ -1,0 +1,521 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
+  <title>Deepfake Detector — ML</title>
+  <style>
+    @import url('https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;600;700&display=swap');
+
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+
+    body {
+      min-height: 100vh;
+      background: #060a0f;
+      color: #e2e8f0;
+      font-family: 'IBM Plex Mono', monospace;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      padding: 40px 16px 60px;
+    }
+
+    body::before {
+      content: '';
+      position: fixed; inset: 0; z-index: 0;
+      background-image:
+        linear-gradient(rgba(0,255,136,0.025) 1px, transparent 1px),
+        linear-gradient(90deg, rgba(0,255,136,0.025) 1px, transparent 1px);
+      background-size: 40px 40px;
+      pointer-events: none;
+    }
+
+    .wrap { position: relative; z-index: 1; width: 100%; max-width: 580px; }
+
+    /* Header */
+    .header { text-align: center; margin-bottom: 32px; }
+    .header h1 {
+      font-size: 26px; font-weight: 700; letter-spacing: 3px;
+      background: linear-gradient(135deg, #fff 0%, #00ff88 55%, #00b4ff 100%);
+      -webkit-background-clip: text; -webkit-text-fill-color: transparent;
+      background-clip: text; margin-bottom: 6px;
+    }
+    .header p { font-size: 9px; color: #1e3a2a; letter-spacing: 2px; }
+
+    /* Server status */
+    .status-bar {
+      display: flex; align-items: center; gap: 8px;
+      background: rgba(0,255,136,0.04); border: 1px solid rgba(0,255,136,0.12);
+      border-radius: 8px; padding: 10px 14px; margin-bottom: 18px;
+      font-size: 9px; letter-spacing: 1px;
+    }
+    .status-dot {
+      width: 7px; height: 7px; border-radius: 50%;
+      background: #334155; flex-shrink: 0;
+      transition: background 0.3s;
+    }
+    .status-dot.online  { background: #00ff88; box-shadow: 0 0 6px #00ff8866; }
+    .status-dot.offline { background: #ff4444; }
+    #statusText { color: #334155; }
+
+    /* Drop zone */
+    .drop-zone {
+      border: 2px dashed #1a3020; border-radius: 12px;
+      min-height: 200px; display: flex; align-items: center;
+      justify-content: center; cursor: pointer;
+      background: rgba(0,0,0,0.3); position: relative;
+      overflow: hidden; transition: all 0.25s; margin-bottom: 12px;
+    }
+    .drop-zone:hover  { border-color: #243d2a; }
+    .drop-zone.over   { border-color: #00ff88; background: rgba(0,255,136,0.03); }
+    .drop-zone.ready  { border-color: rgba(0,180,255,0.4); border-style: solid; }
+    .drop-zone.invalid{ border-color: #ff4444; }
+
+    .drop-placeholder { text-align: center; padding: 20px; pointer-events: none; }
+    .drop-icon { font-size: 38px; opacity: 0.07; margin-bottom: 10px; }
+    .drop-text { font-size: 11px; color: #1a2535; letter-spacing: 2px; }
+    .drop-sub  { font-size: 9px; color: #0f1520; margin-top: 5px; }
+
+    #preview {
+      width: 100%; height: 100%; object-fit: cover;
+      position: absolute; inset: 0; border-radius: 10px; display: none;
+    }
+    .fname-tag { font-size: 9px; color: #334155; text-align: center; margin-bottom: 12px; }
+
+    /* Analyze button */
+    #analyzeBtn {
+      width: 100%; padding: 14px 0;
+      background: linear-gradient(135deg, #00ff88, #00b4ff);
+      border: none; border-radius: 8px; cursor: pointer;
+      color: #060a0f; font-weight: 700; font-size: 12px;
+      letter-spacing: 3px; font-family: inherit;
+      transition: all 0.2s; margin-bottom: 16px;
+    }
+    #analyzeBtn:hover:not(:disabled) { opacity: 0.88; transform: translateY(-1px); }
+    #analyzeBtn:disabled { background: #0d1520; color: #1f2937; cursor: not-allowed; transform: none; }
+
+    /* Progress */
+    .prog-wrap { margin-bottom: 14px; display: none; }
+    .prog-track { height: 3px; background: #0d1520; border-radius: 2px; overflow: hidden; }
+    .prog-fill  {
+      height: 100%; width: 0%;
+      background: linear-gradient(90deg, #00ff88, #00b4ff);
+      border-radius: 2px; transition: width 0.4s ease;
+    }
+    .prog-msg { font-size: 9px; color: #1e293b; margin-top: 5px; }
+
+    /* Error */
+    .error-box {
+      padding: 12px 14px; background: rgba(255,50,50,0.07);
+      border: 1px solid rgba(255,50,50,0.22); border-radius: 8px;
+      font-size: 10px; color: #ff6464; line-height: 1.65;
+      margin-bottom: 14px; display: none;
+    }
+
+    /* Result card */
+    .result-card {
+      border-radius: 12px; padding: 24px; border: 1px solid;
+      margin-bottom: 16px; display: none;
+      animation: fadeUp 0.4s ease;
+    }
+    @keyframes fadeUp { from { opacity:0; transform:translateY(12px); } to { opacity:1; transform:none; } }
+
+    .verdict-row { display: flex; align-items: center; gap: 20px; margin-bottom: 20px; }
+
+    /* Ring */
+    svg.ring circle.track { fill: none; stroke: #111827; stroke-width: 8; }
+    svg.ring circle.fill  { fill: none; stroke-width: 8; stroke-linecap: round; }
+
+    .verdict-info { flex: 1; }
+    .verdict-text { font-size: 32px; font-weight: 700; letter-spacing: 4px; line-height: 1; margin-bottom: 8px; }
+    .threat-pill  {
+      display: inline-block; padding: 3px 10px; border: 1px solid;
+      border-radius: 3px; font-size: 9px; letter-spacing: 2px; margin-bottom: 6px;
+    }
+    .model-note { font-size: 9px; color: #00b4ff; }
+
+    /* Score bars */
+    .scores { display: flex; flex-direction: column; gap: 10px; margin-bottom: 16px; }
+    .score-row label { font-size: 9px; display: flex; justify-content: space-between; margin-bottom: 4px; }
+    .score-track { height: 4px; background: #0d1520; border-radius: 2px; overflow: hidden; }
+    .score-fill  { height: 100%; border-radius: 2px; transition: width 0.8s ease; }
+
+    /* Per-model breakdown */
+    .breakdown {
+      border-top: 1px solid #0f1629; padding-top: 14px; margin-top: 4px;
+    }
+    .breakdown-title { font-size: 9px; color: #334155; letter-spacing: 2px; margin-bottom: 10px; }
+    .model-row {
+      display: flex; align-items: center; gap: 10px;
+      margin-bottom: 8px; font-size: 9px;
+    }
+    .model-row .mname { color: #475569; flex: 1; }
+    .model-mini-track {
+      width: 120px; height: 3px; background: #0d1520;
+      border-radius: 2px; overflow: hidden; flex-shrink: 0;
+    }
+    .model-mini-fill { height: 100%; border-radius: 2px; }
+    .model-pct { width: 36px; text-align: right; flex-shrink: 0; }
+    .model-time { color: #1e293b; flex-shrink: 0; }
+    .model-error { color: #ff4444; font-size: 8px; }
+
+    /* Device badge */
+    .device-badge {
+      display: inline-block; padding: 2px 8px;
+      background: rgba(0,180,255,0.08); border: 1px solid rgba(0,180,255,0.2);
+      border-radius: 3px; font-size: 8px; color: #00b4ff;
+      letter-spacing: 1px; margin-top: 8px;
+    }
+
+    /* How-to */
+    .how-card {
+      background: rgba(0,180,255,0.04); border: 1px solid rgba(0,180,255,0.10);
+      border-radius: 10px; padding: 16px; margin-top: 8px;
+    }
+    .how-title { font-size: 9px; color: #00b4ff; letter-spacing: 2px; margin-bottom: 10px; }
+    .how-step  { font-size: 10px; color: #1e3a4a; line-height: 1.9; }
+    .how-step code { color: #00ff88; background: rgba(0,255,136,0.06); padding: 1px 5px; border-radius: 3px; }
+
+    .footer { font-size: 8px; color: #0d1520; letter-spacing: 2px; text-align: center; margin-top: 32px; }
+  </style>
+</head>
+<body>
+<div class="wrap">
+
+  <div class="header">
+    <h1>DEEPFAKE DETECTOR</h1>
+    <p>PYTHON ML · 3-MODEL ENSEMBLE · LOCAL INFERENCE · NO API KEY NEEDED</p>
+  </div>
+
+  <!-- Server status -->
+  <div class="status-bar">
+    <div class="status-dot" id="statusDot"></div>
+    <span id="statusText">Checking Python server...</span>
+  </div>
+
+  <!-- Drop zone -->
+  <div class="drop-zone" id="dropZone"
+    onclick="document.getElementById('fileInput').click()"
+    ondragover="event.preventDefault(); this.classList.add('over')"
+    ondragleave="this.classList.remove('over')"
+    ondrop="handleDrop(event)">
+    <div class="drop-placeholder" id="placeholder">
+      <div class="drop-icon">◈</div>
+      <div class="drop-text">CLICK OR DROP IMAGE HERE</div>
+      <div class="drop-sub">JPG · PNG · WEBP</div>
+    </div>
+    <img id="preview" alt="preview" />
+  </div>
+  <input type="file" id="fileInput" accept="image/*" style="display:none" onchange="handleFile(this.files[0])" />
+  <div class="fname-tag" id="fnameTag"></div>
+
+  <!-- Progress -->
+  <div class="prog-wrap" id="progWrap">
+    <div class="prog-track"><div class="prog-fill" id="progFill"></div></div>
+    <div class="prog-msg"  id="progMsg"></div>
+  </div>
+
+  <!-- Error -->
+  <div class="error-box" id="errorBox"></div>
+
+  <!-- Analyze button -->
+  <button id="analyzeBtn" disabled onclick="analyze()">▶ ANALYZE IMAGE</button>
+
+  <!-- Result -->
+  <div class="result-card" id="resultCard">
+    <div class="verdict-row">
+      <svg class="ring" width="100" height="100">
+        <circle class="track" cx="50" cy="50" r="42"/>
+        <circle class="fill" cx="50" cy="50" r="42" id="ringFill"
+          transform="rotate(-90 50 50)" stroke-dasharray="0 264"/>
+        <text id="ringPct" x="50" y="46" text-anchor="middle"
+          style="font-size:20px;font-weight:700;font-family:'IBM Plex Mono',monospace;fill:#00ff88">0%</text>
+        <text x="50" y="60" text-anchor="middle"
+          style="font-size:7px;font-family:'IBM Plex Mono',monospace;fill:#475569;letter-spacing:1">CONFIDENCE</text>
+      </svg>
+      <div class="verdict-info">
+        <div class="verdict-text" id="verdictText">—</div>
+        <div class="threat-pill"  id="threatPill">—</div>
+        <div class="model-note">🤖 3-Model Ensemble · Local Python ML</div>
+        <div class="device-badge" id="deviceBadge">CPU</div>
+      </div>
+    </div>
+
+    <div class="scores">
+      <div class="score-row">
+        <label>
+          <span style="color:#ff3232">FAKE probability</span>
+          <span id="fakePct" style="color:#ff3232">0%</span>
+        </label>
+        <div class="score-track"><div class="score-fill" id="fakeBar" style="background:#ff3232;width:0%"></div></div>
+      </div>
+      <div class="score-row">
+        <label>
+          <span style="color:#00ff88">REAL probability</span>
+          <span id="realPct" style="color:#00ff88">0%</span>
+        </label>
+        <div class="score-track"><div class="score-fill" id="realBar" style="background:#00ff88;width:0%"></div></div>
+      </div>
+    </div>
+
+    <!-- Per-model breakdown -->
+    <div class="breakdown">
+      <div class="breakdown-title">◆ PER-MODEL BREAKDOWN</div>
+      <div id="modelBreakdown"></div>
+    </div>
+  </div>
+
+  <!-- How to start server -->
+  <div class="how-card">
+    <div class="how-title">◆ HOW TO START THE PYTHON SERVER</div>
+    <div class="how-step">
+      1. Open terminal in VS Code <code>Ctrl + `</code><br>
+      2. Run: <code>pip install flask flask-cors</code><br>
+      3. Run: <code>python server.py</code><br>
+      4. Open <code>http://127.0.0.1:5000</code> in browser<br>
+      5. Upload an image and click Analyze
+    </div>
+  </div>
+
+  <div class="footer">DEEPFAKE DETECTOR · PYTHON ML · LOCAL INFERENCE</div>
+</div>
+
+<script>
+  const API = "http://127.0.0.1:5000";
+  let currentFile = null;
+
+  // ── Check server status ─────────────────────────────────────────
+  async function checkServer() {
+    try {
+      const res = await fetch(API + "/", { method: "HEAD" });
+      setStatus(true);
+    } catch {
+      setStatus(false);
+    }
+  }
+
+  function setStatus(online) {
+    const dot  = document.getElementById("statusDot");
+    const text = document.getElementById("statusText");
+    if (online) {
+      dot.className  = "status-dot online";
+      text.textContent = "✓ Python ML server is running — ready to analyze";
+      text.style.color = "#00ff88";
+    } else {
+      dot.className  = "status-dot offline";
+      text.textContent = "✗ Server offline — run: python server.py";
+      text.style.color = "#ff4444";
+    }
+    refreshBtn();
+  }
+
+  // Check every 3 seconds
+  checkServer();
+  setInterval(checkServer, 3000);
+
+  // ── File handling ───────────────────────────────────────────────
+  function handleDrop(e) {
+    e.preventDefault();
+    const zone = document.getElementById("dropZone");
+    zone.classList.remove("over");
+    const file = e.dataTransfer.files[0];
+    if (!file || !file.type.startsWith("image/")) {
+      zone.classList.add("invalid");
+      setError("Only image files are supported (JPG, PNG, WEBP).");
+      setTimeout(() => zone.classList.remove("invalid"), 1500);
+      return;
+    }
+    handleFile(file);
+  }
+
+  function handleFile(file) {
+    if (!file || !file.type.startsWith("image/")) return;
+    currentFile = file;
+    clearResult();
+    document.getElementById("fnameTag").textContent = "📎 " + file.name;
+
+    const reader = new FileReader();
+    reader.onload = e => {
+      const preview = document.getElementById("preview");
+      preview.src = e.target.result;
+      preview.style.display = "block";
+      document.getElementById("placeholder").style.display = "none";
+      document.getElementById("dropZone").classList.add("ready");
+      refreshBtn();
+    };
+    reader.readAsDataURL(file);
+  }
+
+  function refreshBtn() {
+    const dot = document.getElementById("statusDot");
+    const btn = document.getElementById("analyzeBtn");
+    btn.disabled = !(currentFile && dot.classList.contains("online"));
+  }
+
+  // ── Analyze ─────────────────────────────────────────────────────
+  async function analyze() {
+    if (!currentFile) return;
+
+    clearResult();
+    showProgress(true);
+    setError("");
+
+    const steps = [
+      { msg: "Uploading image to Python server…", pct: 20 },
+      { msg: "Running ML inference (3 models)…",  pct: 50 },
+      { msg: "Combining ensemble scores…",         pct: 80 },
+    ];
+
+    // Animate progress while waiting
+    let stepIdx = 0;
+    const stepTimer = setInterval(() => {
+      if (stepIdx < steps.length) {
+        setProgress(steps[stepIdx].pct, steps[stepIdx].msg);
+        stepIdx++;
+      }
+    }, 1500);
+
+    try {
+      const formData = new FormData();
+      formData.append("image", currentFile);
+
+      const res = await fetch(API + "/analyze", {
+        method: "POST",
+        body: formData,
+      });
+
+      clearInterval(stepTimer);
+
+      if (!res.ok) {
+        const err = await res.json().catch(() => ({}));
+        throw new Error(err.error || `Server error ${res.status}`);
+      }
+
+      const data = await res.json();
+      setProgress(100, "Done!");
+      await wait(300);
+      showProgress(false);
+      showResult(data);
+
+    } catch (e) {
+      clearInterval(stepTimer);
+      showProgress(false);
+      if (e.message.includes("fetch")) {
+        setError("Cannot reach Python server. Make sure server.py is running: python server.py");
+      } else {
+        setError(e.message);
+      }
+    }
+  }
+
+  // ── Show result ─────────────────────────────────────────────────
+  function showResult(data) {
+    const fakeScore = data.fake_score;
+    const realScore = data.real_score;
+    const fakePct   = Math.round(fakeScore * 100);
+    const realPct   = Math.round(realScore * 100);
+    const isFake    = fakeScore >= 0.5;
+    const confidence= Math.round(Math.max(fakeScore, realScore) * 100);
+    const color     = isFake ? "#ff3232" : "#00ff88";
+
+    let threat = "AUTHENTIC"; let threatColor = "#00ff88";
+    if      (fakeScore > 0.85) { threat = "☠ CRITICAL"; threatColor = "#ff2020"; }
+    else if (fakeScore > 0.65) { threat = "⚠ HIGH";     threatColor = "#ff6400"; }
+    else if (fakeScore > 0.45) { threat = "◉ MEDIUM";   threatColor = "#f59e0b"; }
+
+    document.getElementById("verdictText").textContent = isFake ? "FAKE" : "REAL";
+    document.getElementById("verdictText").style.color = color;
+
+    const pill = document.getElementById("threatPill");
+    pill.textContent   = `THREAT: ${threat}`;
+    pill.style.color   = threatColor;
+    pill.style.borderColor = threatColor + "66";
+    pill.style.background  = threatColor + "11";
+
+    document.getElementById("deviceBadge").textContent = `⚙ Running on: ${data.device || "CPU"}`;
+
+    const card = document.getElementById("resultCard");
+    card.style.borderColor = color + "44";
+    card.style.background  = color + "08";
+    card.style.display     = "block";
+
+    animateRing(confidence, color);
+
+    setTimeout(() => {
+      document.getElementById("fakePct").textContent = fakePct + "%";
+      document.getElementById("realPct").textContent = realPct + "%";
+      document.getElementById("fakeBar").style.width = fakePct + "%";
+      document.getElementById("realBar").style.width = realPct + "%";
+    }, 100);
+
+    // Per-model breakdown
+    const breakdown = document.getElementById("modelBreakdown");
+    breakdown.innerHTML = "";
+    (data.model_results || []).forEach(m => {
+      const row = document.createElement("div");
+      row.className = "model-row";
+      if (m.error) {
+        row.innerHTML = `
+          <span class="mname">${m.name}</span>
+          <span class="model-error">failed: ${m.error}</span>`;
+      } else {
+        const fp  = Math.round(m.fake_score * 100);
+        const col = fp >= 50 ? "#ff3232" : "#00ff88";
+        row.innerHTML = `
+          <span class="mname">${m.name}</span>
+          <div class="model-mini-track">
+            <div class="model-mini-fill" style="width:${fp}%;background:${col}"></div>
+          </div>
+          <span class="model-pct" style="color:${col}">${fp}%</span>
+          <span class="model-time">${m.elapsed}s</span>`;
+      }
+      breakdown.appendChild(row);
+    });
+  }
+
+  // ── Ring animation ──────────────────────────────────────────────
+  function animateRing(targetPct, color) {
+    const circ = 2 * Math.PI * 42;
+    const fill = document.getElementById("ringFill");
+    const pctEl= document.getElementById("ringPct");
+    fill.style.stroke = color;
+    pctEl.style.fill  = color;
+    let start = null;
+    function step(ts) {
+      if (!start) start = ts;
+      const p   = Math.min((ts - start) / 1000, 1);
+      const cur = Math.round(p * targetPct);
+      fill.setAttribute("stroke-dasharray", `${(cur/100)*circ} ${circ}`);
+      pctEl.textContent = cur + "%";
+      if (p < 1) requestAnimationFrame(step);
+    }
+    requestAnimationFrame(step);
+  }
+
+  // ── Helpers ─────────────────────────────────────────────────────
+  function setProgress(pct, msg) {
+    document.getElementById("progFill").style.width = pct + "%";
+    document.getElementById("progMsg").textContent = msg;
+  }
+
+  function showProgress(show) {
+    document.getElementById("progWrap").style.display = show ? "block" : "none";
+    document.getElementById("analyzeBtn").disabled = show;
+    document.getElementById("analyzeBtn").textContent = show ? "ANALYZING…" : "▶ ANALYZE IMAGE";
+  }
+
+  function setError(msg) {
+    const el = document.getElementById("errorBox");
+    if (msg) { el.textContent = "⚠ " + msg; el.style.display = "block"; }
+    else el.style.display = "none";
+  }
+
+  function clearResult() {
+    document.getElementById("resultCard").style.display = "none";
+    setError("");
+  }
+
+  function wait(ms) { return new Promise(r => setTimeout(r, ms)); }
+</script>
+</body>
+</html>
