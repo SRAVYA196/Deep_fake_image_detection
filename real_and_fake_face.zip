@@ -1,5 +1,5 @@
-git clone https://github.com/SRAVYA196/Deep_fake_image_detection.git
+gh repo clone SRAVYA196/Deep_fake_image_detection
 cd Deep_fake_image_detection
 git rm real_and_fake_face.zip
 git commit -m "Remove real_and_fake_face.zip"
-git push origin main
+git push
